@@ -1,18 +1,17 @@
-import assemblyai as aai
-from elevenlabs import generate, stream
-from openai import OpenAI
 import webbrowser
 import os
 import pyautogui
 import platform
 import speech_recognition as sr
-from dotenv import load_dotenv
 import os
+import assemblyai as aai
+from openai import OpenAI
+from elevenlabs import generate, stream
+from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
-class AI_Assistant:
+class Kodama_AI_Assistant:
     def __init__(self):
         aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
         self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -82,7 +81,7 @@ class AI_Assistant:
                 user_voice = recognizer.recognize_google(audio).lower()
                 print(f"Authentication phrase received: {user_voice}")
                 # Replace 'your-secret-phrase' with the actual authentication phrase
-                if "your-secret-phrase" in user_voice:
+                if "Wake up Jarvis" in user_voice:
                     self.generate_audio("Authentication successful! Welcome back.")
                     return True
                 else:
