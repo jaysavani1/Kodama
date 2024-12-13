@@ -71,7 +71,7 @@ class Kodama_AI_Assistant:
         audio_stream = generate(
             api_key=self.elevenlabs_api_key,
             text=text,
-            voice="Brian",
+            voice="Rachel",
             stream=True
         )
         stream(audio_stream)
