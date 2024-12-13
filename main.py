@@ -1,3 +1,7 @@
+#Windows OS
+# from KodamaAI_Win import Kodama_AI_Assistant
+
+#MAC-OS 
 from KodamaAI_IOS import Kodama_AI_Assistant
 
 def RUN_KODAMA():
