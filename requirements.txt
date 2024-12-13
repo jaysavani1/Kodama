@@ -1,0 +1,8 @@
+assemblyai[extras]
+openai
+speechrecognition
+elevenlabs==0.3.0b0
+sounddevice
+python-dotenv
+requests
+pyautogui
