@@ -1,6 +1,9 @@
+import os
 from openai import OpenAI
 from elevenlabs import generate, stream
 import assemblyai as aai
+from dotenv import load_dotenv
+
 
 load_dotenv()
 
@@ -71,7 +74,17 @@ class Kodama_AI_Assistant:
         audio_stream = generate(
             api_key=self.elevenlabs_api_key,
             text=text,
-            voice="Rachel",
+            voice="Charlotte",
             stream=True
         )
         stream(audio_stream)
+
+def RUN_KODAMA():
+    greeting = "Hey there! I’m KODAMA, here to make your life easier and way more fun. What’s up?"
+    ai_assistant = Kodama_AI_Assistant()
+    ai_assistant.generate_audio(greeting)
+    ai_assistant.start_transcription()
+
+ 
+if __name__ == "__main__":
+    RUN_KODAMA()
