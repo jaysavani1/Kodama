@@ -1,8 +1,11 @@
 assemblyai[extras]
-openai
+openai==0.28
 speechrecognition
 elevenlabs==0.3.0b0
 sounddevice
 python-dotenv
 requests
 pyautogui
+numpy
+scipy
+faster-whisper
