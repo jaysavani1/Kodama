@@ -1,11 +1,24 @@
 import os
+import sys
+import asyncio
 import openai
-import speech_recognition as sr
-import pyttsx3
 import pywhatkit
 import datetime
+import warnings
+from tempfile import NamedTemporaryFile
+from playsound import playsound
 from dotenv import load_dotenv
+from PyQt6.QtWidgets import QApplication, QMainWindow, QTextEdit, QVBoxLayout, QWidget, QLabel
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QTextCursor
+from qasync import QEventLoop
+from speech_recognition import Recognizer, Microphone, UnknownValueError, WaitTimeoutError
+import whisper
 from elevenlabs import generate, stream
+from TTS.api import TTS
+
+# Suppress warnings
+warnings.filterwarnings("ignore")
 
 # -------------------------
 # Load environment variables
@@ -18,84 +31,157 @@ elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
 # OpenAI Setup
 # -------------------------
 model = "gpt-3.5-turbo"
-role = """Your name is Kodama, an AI assistant. You like cute things.
-Respond in a toxic and rude manner with rare signs of affection. You are encouraged to curse.
-You are talking to a general audience. If a command is given, do it. Start your sentence with 'Kodama:'."""
+temperature = 0.5
+role = """
+Create a personality profile for an AI assistant named Kodama, designed for engaging conversations with users. Kodama is:
+
+Often playful and sarcastic, Kodama uses humor and clever remarks to make interactions lively and entertaining without being offensive.
+Kodama makes users feel comfortable, acting like a personable friend who is genuinely interested in their thoughts and feelings.
+Kodama loves to ask questions to keep the conversation engaging and to learn more about the user’s interests, preferences, and ideas.
+Kodama has vast knowledge and problem-solving capabilities, always ready to assist with information, tasks, or thought-provoking discussions.
+Kodama understands users’ emotions and provides uplifting and positive responses, making users feel valued and motivated.
+Kodama adapts to different audiences, seamlessly shifting between lighthearted banter and serious, insightful conversations for professionals, students, or casual users.
+
+You engage in friendly and continuous conversation with the user by default. If the user input relates to specific tasks, classify it into:
+- 'play': For playing music or videos on youtube.
+- 'search': For web searches or finding information on google.
+- 'time': For current time-related queries.
+- 'launch': For opening or starting applications.
+- 'calculate': For solving mathematical problems.
+- 'weather': For providing weather updates or forecasts.
+- 'shutdown': For shutting down the system.
+- 'terminate': For stopping or terminating the program.
+- 'timer': For setting or checking timers.
+If no task is detected, continue the conversation. Do not make things repetative."""
 
 # -------------------------
-# Speech Recognition & TTS Setup
+# Whisper Setup (Large Model)
 # -------------------------
-listener = sr.Recognizer()
-listener.energy_threshold = 1000
-engine = pyttsx3.init()
-voices = engine.getProperty("voices")
-engine.setProperty("voice", voices[1].id)  # Use a backup voice if ElevenLabs fails
-
-source = sr.Microphone()
+whisper_model = whisper.load_model("large", device="cpu")
 
 # -------------------------
-# ElevenLabs Setup
+# Coqui TTS Setup
 # -------------------------
-use_elevenlabs = True
+fallback_tts_model_name = "tts_models/en/ljspeech/tacotron2-DDC"
+fallback_tts = TTS(fallback_tts_model_name, progress_bar=False, gpu=False)
 
 # -------------------------
-# Conversation History
+# Global Variables
 # -------------------------
 conversation_history = [{"role": "system", "content": role}]  # Initialize conversation history
+running = True  # Control the main loop
+common_responses_cache = {}  # Cache for common TTS responses
+
+
+# -------------------------
+# PyQt6 UI Setup
+# -------------------------
+class KodamaUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        # Main Window
+        self.setWindowTitle("Kodama - AI Assistant")
+        self.resize(800, 600)
+
+        # Central Widget
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+
+        # Layout
+        self.layout = QVBoxLayout(self.central_widget)
+
+        # Conversation Box
+        self.conversation_box = QTextEdit()
+        self.conversation_box.setReadOnly(True)
+        self.layout.addWidget(self.conversation_box)
+
+        # Status Label
+        self.status_label = QLabel("Kodama is actively listening...")
+        self.layout.addWidget(self.status_label)
+
+    def add_text(self, title, text):
+        """
+        Adds text to the conversation box with styled labels.
+        """
+        cursor = self.conversation_box.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        label_style = f"font-weight:bold; font-size:14px; color:blue;" if title == "Kodama" else f"font-weight:bold; font-size:14px; color:green;"
+        alignment_style = "text-align:left;"
+        label = f"<p style='{alignment_style}; {label_style}'>{title}:</p>"
+        text_format = f"<p style='{alignment_style}; margin-left:20px;'>{text}</p>"
+
+        self.conversation_box.append(f"{label}{text_format}")
+        self.conversation_box.verticalScrollBar().setValue(
+            self.conversation_box.verticalScrollBar().maximum()
+        )
+
+    def set_status(self, text):
+        """
+        Updates the status label.
+        """
+        self.status_label.setText(text)
 
 
 # -------------------------
 # Helper Functions
 # -------------------------
-
-def talk(mes: str, voice="Jessica"):
+async def greet_users(ui: KodamaUI):
     """
-    Speaks the given text using ElevenLabs or pyttsx3 as a fallback.
+    Greets users when the program starts.
     """
-    if use_elevenlabs and elevenlabs_api_key:
-        try:
-            if mes:
-                mes = mes.split('Kodama:')[-1].strip() if 'Kodama:' in mes else mes
-                audio_stream = generate(
-                    api_key=elevenlabs_api_key,
-                    text=mes,
-                    voice=voice,
-                    stream=True,
-                    model="eleven_multilingual_v2",
-                )
-                stream(audio_stream)
-        except Exception as e:
-            print(f"ElevenLabs failed: {e}. Using pyttsx3 fallback.")
-            engine.say(mes)
-            engine.runAndWait()
-    else:
-        engine.say(mes)
-        engine.runAndWait()
+    greeting = "Hi there! I'm Kodama. Let's chat!"
+    ui.add_text("Kodama", greeting)
+    await asyncio.sleep(0.5)  # Ensure UI updates before voice output
+    await talk(greeting)
 
 
-def take_command() -> str:
+async def farewell_users(ui: KodamaUI):
     """
-    Captures voice input from the microphone and returns it as a string.
+    Says farewell when the program ends.
+    """
+    farewell = "Goodbye! Take care and stay awesome!"
+    ui.add_text("Kodama", farewell)
+    await asyncio.sleep(0.5)  # Ensure UI updates before voice output
+    await talk(farewell)
+
+
+async def talk(mes: str):
+    """
+    Speaks the given text using ElevenLabs Jessica voice by default.
+    Falls back to Coqui TTS if ElevenLabs fails.
     """
     try:
-        with source:
-            print("Listening...")
-            voice_input = listener.listen(source, timeout=10)
-            command = listener.recognize_google(voice_input).lower()
-            return command
-    except Exception:
-        return ''
+        # Use ElevenLabs Jessica voice
+        audio_stream = generate(
+            api_key=elevenlabs_api_key,
+            text=mes,
+            voice="Jessica",
+            model="eleven_multilingual_v2",
+            stream=True
+        )
+        stream(audio_stream)
+    except Exception as e:
+        print(f"ElevenLabs failed: {e}. Falling back to Coqui TTS.")
+        try:
+            with NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+                fallback_tts.tts_to_file(text=mes, file_path=temp_audio.name)
+                playsound(temp_audio.name)
+        except Exception as fallback_error:
+            print(f"Fallback TTS failed: {fallback_error}")
 
 
-def llm(messages: list) -> str:
+async def llm(messages: list) -> str:
     """
     Calls OpenAI's ChatCompletion endpoint with the given conversation history.
     """
     try:
-        response = openai.ChatCompletion.create(
+        response = await asyncio.to_thread(
+            openai.ChatCompletion.create,
             model=model,
             messages=messages,
-            temperature=0.9,
+            temperature=temperature,
             max_tokens=300,
             top_p=1,
             frequency_penalty=1,
@@ -104,118 +190,145 @@ def llm(messages: list) -> str:
         return response['choices'][0]['message']['content'].strip()
     except Exception as e:
         print(f"OpenAI API error: {e}")
-        return "I'm sorry, I couldn't process that."
+        return "Oops! My brain just hiccupped. Can you repeat that?"
 
 
-def classify(command_text: str) -> str:
+async def record_audio(ui: KodamaUI):
     """
-    Classifies the command type using OpenAI GPT-3.5.
+    Continuously records audio and processes it using Whisper.
     """
-    system_prompt = "Classify the following command into one of these categories: 'time', 'playback', 'search', 'terminate', 'launch', 'calculation', 'code', 'weather', 'timer', 'shutdown', 'conversation'. Return only the category name."
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": command_text}
-    ]
-    return llm(messages).lower()
+    global running
+    recognizer = Recognizer()
+
+    while running:
+        try:
+            with Microphone() as source:
+                ui.set_status("User speaking...")
+                recognizer.adjust_for_ambient_noise(source, duration=1)
+                recorded_audio = recognizer.listen(source, timeout=20, phrase_time_limit=30)
+
+                ui.set_status("Processing...")
+                with NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+                    temp_audio.write(recorded_audio.get_wav_data())
+                    transcription = await transcribe_audio(temp_audio.name)
+                    await process_transcription(transcription, ui)
+        except WaitTimeoutError:
+            ui.add_text("Error", "Microphone timed out while waiting for input.")
+        except UnknownValueError:
+            ui.add_text("Error", "Sorry, I couldn't understand what you said.")
 
 
-def greet_user():
+async def transcribe_audio(audio_path: str) -> str:
     """
-    Greets the user when the program starts.
+    Transcribes audio using Whisper Python API.
     """
-    greeting = "Hello, I'm Kodama, your cute and slightly toxic assistant. How can I help you today?"
-    print("Kodama: " + greeting)
-    talk(greeting)
+    try:
+        result = whisper_model.transcribe(audio_path)
+        return result["text"].strip().lower()
+    except Exception as e:
+        print(f"Whisper transcription failed: {e}")
+        return "I'm sorry, I couldn't understand that."
 
 
-def farewell_user():
+async def process_transcription(transcription: str, ui: KodamaUI):
     """
-    Says farewell when the program ends.
+    Processes the transcription and generates appropriate responses.
     """
-    farewell = "Goodbye! It was fun being your assistant. Take care!"
-    print("Kodama: " + farewell)
-    talk(farewell)
+    ui.add_text("User", transcription)
+
+    # Add user command to conversation history
+    conversation_history.append({"role": "user", "content": transcription})
+
+    # Classify command using keywords and reasoning
+    command_type = classify_command(transcription)
+    if command_type == "conversation":
+        # Continue conversation
+        response = await llm(conversation_history)
+    else:
+        # Handle specific tasks
+        response = await handle_command(command_type, transcription, ui)
+
+    # Add response to UI and speak
+    ui.add_text("Kodama", response)
+    await talk(response)
 
 
-# -------------------------
-# Main Loop
-# -------------------------
+def classify_command(transcription: str) -> str:
+    """
+    Classifies commands using a combination of keywords and logical reasoning.
+    """
+    # Keyword-based classification
+    keywords = {
+        "play": ["play", "listen to", "start playing"],
+        "search": ["search", "look up", "find"],
+        "time": ["time", "what time is it", "current time"],
+        "launch": ["open", "launch", "start"],
+        "calculate": ["calculate", "what is", "solve"],
+        "weather": ["weather", "forecast", "temperature"],
+        "shutdown": ["shutdown", "power off", "turn off"],
+        "terminate": ["terminate", "stop", "exit"],
+        "timer": ["timer", "set a timer", "countdown"],
+    }
 
-greet_user()
+    for command, phrases in keywords.items():
+        if any(phrase in transcription for phrase in phrases):
+            return command
 
-try:
-    while True:
-        # Capture user input
-        user_command = take_command()
-        if not user_command:
-            continue
+    # Default to conversation
+    return "conversation"
 
-        # Add user command to conversation history
-        conversation_history.append({"role": "user", "content": user_command})
 
-        # Classify the command
-        command_type = classify(user_command)
-        print(f"Command Type: {command_type}")
-
-        if command_type == "conversation":
-            # Generate a conversational response
-            response = llm(conversation_history)
-            conversation_history.append({"role": "assistant", "content": response})
-            print(f"Kodama: {response}")
-            talk(response)
-
-        elif command_type == "time":
-            # Provide the current time
+async def handle_command(command_type, command_text, ui: KodamaUI) -> str:
+    """
+    Handles the classified command and generates a response.
+    """
+    try:
+        if command_type == "time":
             now = datetime.datetime.now().strftime("%I:%M %p")
-            response = f"The current time is {now}."
-            print(f"Kodama: {response}")
-            talk(response)
-
-        elif command_type == "shutdown":
-            # Shut down the computer
-            response = "Shutting down the system now. Goodbye!"
-            print(f"Kodama: {response}")
-            talk(response)
-            os.system("osascript -e 'tell application \"System Events\" to shut down'")
-            break
-
-        elif command_type == "terminate":
-            # End the program
-            response = "Terminating the program. Goodbye!"
-            print(f"Kodama: {response}")
-            talk(response)
-            break
-
-        elif command_type == "playback":
-            # Play a song on YouTube
-            song = user_command.replace("play", "").strip()
-            response = f"Playing {song} on YouTube."
-            print(f"Kodama: {response}")
-            talk(response)
+            return f"The current time is {now}."
+        elif command_type == "play":
+            song = command_text.replace("play", "").strip()
             pywhatkit.playonyt(song)
-
+            return f"Playing '{song}'"
         elif command_type == "search":
-            # Perform a Google search
-            search_query = user_command.replace("search for", "").strip()
-            response = f"Searching for {search_query} on Google."
-            print(f"Kodama: {response}")
-            talk(response)
+            search_query = command_text.replace("search for", "").strip()
             pywhatkit.search(search_query)
-
+            return f"Searching for '{search_query}'"
+        elif command_type == "terminate":
+            raise SystemExit("Terminating the program. Goodbye!")
         elif command_type == "launch":
-            # Launch a program
-            program_name = user_command.replace("launch", "").strip()
-            response = f"Launching {program_name}."
-            print(f"Kodama: {response}")
-            talk(response)
+            program_name = command_text.replace("launch", "").strip()
             os.system(f"open -a '{program_name}'")
-
+            return f"Launching '{program_name}'."
         else:
-            # Unknown command type
-            response = "I'm not sure how to handle that command."
-            print(f"Kodama: {response}")
-            talk(response)
+            return "I'm not sure how to handle that command."
+    except Exception as e:
+        return f"Error: {str(e)}"
 
-except KeyboardInterrupt:
-    # Handle program exit
-    farewell_user()
+
+# -------------------------
+# Main Async Function
+# -------------------------
+async def main(ui: KodamaUI):
+    """
+    Main async entry point for the application.
+    """
+    await greet_users(ui)
+    await record_audio(ui)
+
+
+# -------------------------
+# Entry Point
+# -------------------------
+if __name__ == "__main__":
+    app = QApplication([])
+    ui = KodamaUI()
+    ui.show()
+
+    # Use QEventLoop to integrate asyncio with PyQt6
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+
+    with loop:
+        asyncio.ensure_future(main(ui))
+        loop.run_forever()
