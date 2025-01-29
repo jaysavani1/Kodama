@@ -72,7 +72,6 @@ conversation_history = [{"role": "system", "content": role}]  # Initialize conve
 running = True  # Control the main loop
 common_responses_cache = {}  # Cache for common TTS responses
 
-
 # -------------------------
 # PyQt6 UI Setup
 # -------------------------
@@ -123,7 +122,6 @@ class KodamaUI(QMainWindow):
         """
         self.status_label.setText(text)
 
-
 # -------------------------
 # Helper Functions
 # -------------------------
@@ -136,7 +134,6 @@ async def greet_users(ui: KodamaUI):
     await asyncio.sleep(0.5)  # Ensure UI updates before voice output
     await talk(greeting)
 
-
 async def farewell_users(ui: KodamaUI):
     """
     Says farewell when the program ends.
@@ -145,7 +142,6 @@ async def farewell_users(ui: KodamaUI):
     ui.add_text("Kodama", farewell)
     await asyncio.sleep(0.5)  # Ensure UI updates before voice output
     await talk(farewell)
-
 
 async def talk(mes: str):
     """
@@ -171,7 +167,6 @@ async def talk(mes: str):
         except Exception as fallback_error:
             print(f"Fallback TTS failed: {fallback_error}")
 
-
 async def llm(messages: list) -> str:
     """
     Calls OpenAI's ChatCompletion endpoint with the given conversation history.
@@ -191,7 +186,6 @@ async def llm(messages: list) -> str:
     except Exception as e:
         print(f"OpenAI API error: {e}")
         return "Oops! My brain just hiccupped. Can you repeat that?"
-
 
 async def record_audio(ui: KodamaUI):
     """
@@ -217,7 +211,6 @@ async def record_audio(ui: KodamaUI):
         except UnknownValueError:
             ui.add_text("Error", "Sorry, I couldn't understand what you said.")
 
-
 async def transcribe_audio(audio_path: str) -> str:
     """
     Transcribes audio using Whisper Python API.
@@ -228,7 +221,6 @@ async def transcribe_audio(audio_path: str) -> str:
     except Exception as e:
         print(f"Whisper transcription failed: {e}")
         return "I'm sorry, I couldn't understand that."
-
 
 async def process_transcription(transcription: str, ui: KodamaUI):
     """
@@ -250,8 +242,8 @@ async def process_transcription(transcription: str, ui: KodamaUI):
 
     # Add response to UI and speak
     ui.add_text("Kodama", response)
+    await asyncio.sleep(0.5)  # Ensure UI updates before voice output
     await talk(response)
-
 
 def classify_command(transcription: str) -> str:
     """
@@ -260,13 +252,13 @@ def classify_command(transcription: str) -> str:
     # Keyword-based classification
     keywords = {
         "play": ["play", "listen to", "start playing"],
-        "search": ["search", "look up", "find"],
+        "search": ["search", "look up", "find", "find me"],
         "time": ["time", "what time is it", "current time"],
         "launch": ["open", "launch", "start"],
         "calculate": ["calculate", "what is", "solve"],
         "weather": ["weather", "forecast", "temperature"],
         "shutdown": ["shutdown", "power off", "turn off"],
-        "terminate": ["terminate", "stop", "exit"],
+        "terminate": ["terminate", "stop", "exit", "good bye","good bye kodama"],
         "timer": ["timer", "set a timer", "countdown"],
     }
 
@@ -276,7 +268,6 @@ def classify_command(transcription: str) -> str:
 
     # Default to conversation
     return "conversation"
-
 
 async def handle_command(command_type, command_text, ui: KodamaUI) -> str:
     """
@@ -305,7 +296,6 @@ async def handle_command(command_type, command_text, ui: KodamaUI) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
-
 # -------------------------
 # Main Async Function
 # -------------------------
@@ -315,7 +305,6 @@ async def main(ui: KodamaUI):
     """
     await greet_users(ui)
     await record_audio(ui)
-
 
 # -------------------------
 # Entry Point
